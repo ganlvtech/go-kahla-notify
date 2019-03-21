@@ -30,8 +30,17 @@ func main() {
 	go RunKahlaNotify(webSocket, done2)
 	go RunKahlaClient(config.Email, config.Password, webSocket, 5, done3)
 	WaitForCtrlC()
-	done1 <- true
-	done2 <- true
-	done3 <- true
+    select {
+        case done1 <- true:
+        default:
+    }
+    select {
+        case done2 <- true:
+        default:
+    }
+    select {
+        case done3 <- true:
+        default:
+    }
 	webSocket.Close()
 }

@@ -148,7 +148,9 @@ func (w *WebSocket) runReceiveMessage() {
 }
 
 func (w *WebSocket) Close() {
-	_ = w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	_ = w.conn.Close()
+	if w.conn != nil {
+		_ = w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		_ = w.conn.Close()
+	}
 	w.State = WebSocketStateClosed
 }

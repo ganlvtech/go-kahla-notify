@@ -23,7 +23,7 @@ func SaveConfigToFile(filename string, config *Config) error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(filename, data, 0777)
+	err = ioutil.WriteFile(filename, data, 0600)
 	if err != nil {
 		return err
 	}

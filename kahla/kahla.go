@@ -12,6 +12,7 @@ type Client struct {
 	client     http.Client
 	Auth       *AuthService
 	Friendship *FriendshipService
+	Oss        *OssService
 }
 
 type service struct {
@@ -22,12 +23,15 @@ type AuthService service
 
 type FriendshipService service
 
+type OssService service
+
 func NewClient() *Client {
 	c := new(Client)
 	c.client = http.Client{}
 	c.client.Jar, _ = cookiejar.New(nil)
 	c.Auth = &AuthService{c}
 	c.Friendship = &FriendshipService{c}
+	c.Oss = &OssService{c}
 	return c
 }
 

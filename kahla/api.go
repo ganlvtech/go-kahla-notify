@@ -113,7 +113,7 @@ func (s *FriendshipService) MyFriends() (*MyFriendsResponse, error) {
 	return response, nil
 }
 
-func (s *FriendshipService) HeadImgFile(headImgFileKey int) ([]byte, error) {
+func (s *OssService) HeadImgFile(headImgFileKey int) ([]byte, error) {
 	resp, err := s.client.client.Get(fmt.Sprintf("https://oss.aiursoft.com/download/fromkey/%d?w=100&h=100", headImgFileKey))
 	if err != nil {
 		return nil, err

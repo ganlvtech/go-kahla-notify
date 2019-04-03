@@ -1,9 +1,9 @@
 package kahla
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"net/url"
 	"time"
 )
@@ -17,25 +17,14 @@ func (s *AuthService) Login(email string, password string) (*LoginResponse, erro
 	v := url.Values{}
 	v.Add("Email", email)
 	v.Add("Password", password)
-	resp, err := s.client.client.PostForm(KahlaServer+"/Auth/AuthByPassword", v)
+	req, err := NewPostRequest(KahlaServer+"/Auth/AuthByPassword", v)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	response := &LoginResponse{}
+	_, err = s.client.Do(req, response)
 	if err != nil {
 		return nil, err
-	}
-	if resp.StatusCode != 200 {
-		return nil, &ResponseStatusCodeNot200{Response: resp, StatusCode: resp.StatusCode}
-	}
-	j := json.NewDecoder(resp.Body)
-	response := &LoginResponse{Code: -1}
-	err = j.Decode(response)
-	if err != nil {
-		return response, &ResponseJsonDecodeError{response.Message, err}
-	}
-	if response.Code != 0 {
-		return response, &ResponseCodeNotZero{response.Message}
 	}
 	return response, nil
 }
@@ -49,25 +38,14 @@ type InitPusherResponse struct {
 }
 
 func (s *AuthService) InitPusher() (*InitPusherResponse, error) {
-	resp, err := s.client.client.Get(KahlaServer + "/Auth/InitPusher")
+	req, err := http.NewRequest("GET", KahlaServer + "/Auth/InitPusher", nil)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	response := &InitPusherResponse{}
+	_, err = s.client.Do(req, response)
 	if err != nil {
 		return nil, err
-	}
-	if resp.StatusCode != 200 {
-		return nil, &ResponseStatusCodeNot200{Response: resp, StatusCode: resp.StatusCode}
-	}
-	j := json.NewDecoder(resp.Body)
-	response := &InitPusherResponse{Code: -1}
-	err = j.Decode(response)
-	if err != nil {
-		return response, &ResponseJsonDecodeError{response.Message, err}
-	}
-	if response.Code != 0 {
-		return response, &ResponseCodeNotZero{response.Message}
 	}
 	return response, nil
 }
@@ -90,25 +68,14 @@ type MyFriendsResponse struct {
 }
 
 func (s *FriendshipService) MyFriends() (*MyFriendsResponse, error) {
-	resp, err := s.client.client.Get(KahlaServer + "/friendship/MyFriends?orderByName=false")
+	req, err := http.NewRequest("GET", KahlaServer+"/friendship/MyFriends?orderByName=false", nil)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	response := &MyFriendsResponse{}
+	_, err = s.client.Do(req, response)
 	if err != nil {
 		return nil, err
-	}
-	if resp.StatusCode != 200 {
-		return nil, &ResponseStatusCodeNot200{Response: resp, StatusCode: resp.StatusCode}
-	}
-	j := json.NewDecoder(resp.Body)
-	response := &MyFriendsResponse{Code: -1}
-	err = j.Decode(response)
-	if err != nil {
-		return response, &ResponseJsonDecodeError{response.Message, err}
-	}
-	if response.Code != 0 {
-		return response, &ResponseCodeNotZero{response.Message}
 	}
 	return response, nil
 }

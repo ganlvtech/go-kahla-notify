@@ -1,10 +1,10 @@
 package kahla
 
 import (
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -38,7 +38,7 @@ type InitPusherResponse struct {
 }
 
 func (s *AuthService) InitPusher() (*InitPusherResponse, error) {
-	req, err := http.NewRequest("GET", KahlaServer + "/Auth/InitPusher", nil)
+	req, err := http.NewRequest("GET", KahlaServer+"/Auth/InitPusher", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -67,8 +67,10 @@ type MyFriendsResponse struct {
 	Message string `json:"message"`
 }
 
-func (s *FriendshipService) MyFriends() (*MyFriendsResponse, error) {
-	req, err := http.NewRequest("GET", KahlaServer+"/friendship/MyFriends?orderByName=false", nil)
+func (s *FriendshipService) MyFriends(orderByName bool) (*MyFriendsResponse, error) {
+	v := url.Values{}
+	v.Set("orderByName", strconv.FormatBool(orderByName))
+	req, err := http.NewRequest("GET", KahlaServer+"/friendship/MyFriends?"+v.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +82,12 @@ func (s *FriendshipService) MyFriends() (*MyFriendsResponse, error) {
 	return response, nil
 }
 
-func (s *OssService) HeadImgFile(headImgFileKey int) ([]byte, error) {
-	resp, err := s.client.client.Get(fmt.Sprintf("https://oss.aiursoft.com/download/fromkey/%d?w=100&h=100", headImgFileKey))
+// https://oss.aiursoft.com/download/fromkey/2611?w=100&h=100
+func (s *OssService) HeadImgFile(headImgFileKey int, w int, h int) ([]byte, error) {
+	v := url.Values{}
+	v.Set("w", strconv.Itoa(w))
+	v.Set("h", strconv.Itoa(h))
+	resp, err := s.client.client.Get("https://oss.aiursoft.com/download/fromkey/" + strconv.Itoa(headImgFileKey) + "?" + v.Encode())
 	if err != nil {
 		return nil, err
 	}

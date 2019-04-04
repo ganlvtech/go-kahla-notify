@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"time"
 )
 
 const (
@@ -13,24 +14,13 @@ const (
 	EventTypeFriendAcceptedEvent
 )
 
-const (
-	WebSocketStateNew = iota
-	WebSocketStateConnected
-	WebSocketStateDisconnected
-	WebSocketStateClosed
-)
-
 type WebSocket struct {
-	conn         *websocket.Conn
-	State        int
-	Event        chan interface{}
-	Err          chan error
-	Disconnected chan error
+	conn  *websocket.Conn
+	Event chan interface{}
 }
 
-type KahlaEvent struct {
+type Event struct {
 	Type int `json:"type"`
-	Data interface{}
 }
 
 type InvalidEventTypeError struct {
@@ -42,7 +32,7 @@ func (i *InvalidEventTypeError) Error() string {
 }
 
 type NewMessageEvent struct {
-	KahlaEvent
+	Event
 	ConversationID int `json:"conversationId"`
 	Sender         struct {
 		MakeEmailPublic   bool        `json:"makeEmailPublic"`
@@ -63,94 +53,116 @@ type NewMessageEvent struct {
 }
 
 type NewFriendRequestEvent struct {
-	KahlaEvent
+	Event
 	RequesterId string `json:"requesterId"`
 }
 
-type WereDeletedEvent KahlaEvent
+type WereDeletedEvent Event
 
-type FriendAcceptedEvent KahlaEvent
+type FriendAcceptedEvent Event
 
-func NewWebSocket() (*WebSocket) {
+func NewWebSocket() *WebSocket {
 	w := new(WebSocket)
-	w.Disconnected = make(chan error)
-	w.Err = make(chan error)
 	w.Event = make(chan interface{})
-	w.State = WebSocketStateNew
 	return w
 }
 
-func (w *WebSocket) Connect(serverPath string) error {
+// https://github.com/gorilla/websocket/blob/master/examples/echo/client.go
+// wss://stargate.aiursoft.com/Listen/Channel?Id=&Key=
+// You should get message from w.Event.
+// This is a synchronize call, it returns when connection closed.
+func (w *WebSocket) Connect(serverPath string, interrupt chan struct{}) error {
+	// Connect
 	var err error
 	w.conn, _, err = websocket.DefaultDialer.Dial(serverPath, nil)
 	if err != nil {
 		return err
 	}
+	// close connection when return
+	defer w.conn.Close()
 
-	go w.runReceiveMessage()
+	// Main message loop in another goroutine
+	done := make(chan struct{})
+	errChan := make(chan error)
+	defer close(errChan)
+	go w.runReceiveMessage(done, errChan)
 
-	w.State = WebSocketStateConnected
-	return nil
+	ticker := time.NewTicker(45 * time.Second)
+	defer ticker.Stop()
+
+	// wait connection close or interrupt
+	for {
+		select {
+		case <-done:
+			// connection closed
+			return nil
+		case err := <-errChan:
+			// error
+			return err
+		case <-ticker.C:
+			// heartbeat
+			err := w.conn.WriteMessage(websocket.TextMessage, []byte{})
+			if err != nil {
+				return err
+			}
+		case <-interrupt:
+			// Cleanly close the connection by sending a close message and then
+			// waiting (with timeout) for the server to close the connection.
+			err := w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			if err != nil {
+				return err
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+			}
+			return nil
+		}
+	}
 }
 
-func (w *WebSocket) runReceiveMessage() {
+func (w *WebSocket) runReceiveMessage(done chan<- struct{}, errChan chan<- error) {
+	// done when main loop exit
+	defer close(done)
 	for {
 		_, message, err := w.conn.ReadMessage()
 		if err != nil {
-			w.State = WebSocketStateDisconnected
-			select {
-			case w.Err <- err:
-			default:
-			}
-			w.Disconnected <- err
+			// send error and exit
+			errChan <- err
 			return
 		}
-		event1 := new(KahlaEvent)
-		err = json.Unmarshal(message, event1)
+		event, err := DecodeWebSocketEvent(message)
 		if err != nil {
-			select {
-			case w.Err <- err:
-			default:
-			}
-			continue
+			errChan <- err
+			return
 		}
-		var event interface{}
-		switch event1.Type {
-		case EventTypeNewMessage:
-			event = new(NewMessageEvent)
-		case EventTypeNewFriendRequest:
-			event = new(NewFriendRequestEvent)
-		case EventTypeWereDeletedEvent:
-			event = new(WereDeletedEvent)
-		case EventTypeFriendAcceptedEvent:
-			event = new(FriendAcceptedEvent)
-		default:
-			err = &InvalidEventTypeError{event1.Type}
-			select {
-			case w.Err <- err:
-			default:
-			}
-			continue
-		}
-		err = json.Unmarshal(message, event)
-		if err != nil {
-			select {
-			case w.Err <- err:
-			default:
-			}
-			continue
-		}
-		select {
-		case w.Event <- event:
-		default:
-		}
+		w.Event <- event
 	}
 }
 
-func (w *WebSocket) Close() {
-	if w.conn != nil {
-		_ = w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-		_ = w.conn.Close()
+func DecodeWebSocketEvent(message []byte) (interface{}, error) {
+	var err error
+	event1 := &Event{}
+	err = json.Unmarshal(message, event1)
+	if err != nil {
+		return event1, err
 	}
-	w.State = WebSocketStateClosed
+	var event interface{}
+	switch event1.Type {
+	case EventTypeNewMessage:
+		event = &NewMessageEvent{}
+	case EventTypeNewFriendRequest:
+		event = &NewFriendRequestEvent{}
+	case EventTypeWereDeletedEvent:
+		event = &WereDeletedEvent{}
+	case EventTypeFriendAcceptedEvent:
+		event = &FriendAcceptedEvent{}
+	default:
+		return event1, &InvalidEventTypeError{event1.Type}
+	}
+	err = json.Unmarshal(message, event)
+	if err != nil {
+		return event, err
+	}
+	return event, nil
 }

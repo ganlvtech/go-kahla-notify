@@ -6,8 +6,11 @@ import (
 )
 
 type Config struct {
-	Email    string `json:"Email"`
-	Password string `json:"Password"`
+	Email            string `json:"Email"`
+	Password         string `json:"Password"`
+	EnableSnoreToast bool   `json:"EnableSnoreToast"`
+	SnoreToastPath   string `json:"SnoreToastPath"`
+	AvatarsDir       string `json:"AvatarsDir"`
 }
 
 func SaveConfig(config *Config) ([]byte, error) {
@@ -33,6 +36,12 @@ func SaveConfigToFile(filename string, config *Config) error {
 func LoadConfig(data []byte) (*Config, error) {
 	config := new(Config)
 	err := json.Unmarshal(data, config)
+	if config.SnoreToastPath == "" {
+		config.SnoreToastPath = "SnoreToast.exe"
+	}
+	if config.AvatarsDir == "" {
+		config.AvatarsDir = "avatars"
+	}
 	if err != nil {
 		return config, err
 	}

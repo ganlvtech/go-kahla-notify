@@ -14,9 +14,18 @@ const (
 	EventTypeFriendAcceptedEvent
 )
 
+const (
+	WebSocketStateNew = iota
+	WebSocketStateConnected
+	WebSocketStateDisconnected
+	WebSocketStateClosed
+)
+
 type WebSocket struct {
-	conn  *websocket.Conn
-	Event chan interface{}
+	conn         *websocket.Conn
+	Event        chan interface{}
+	State        int
+	StateChanged chan int
 }
 
 type Event struct {
@@ -63,8 +72,18 @@ type FriendAcceptedEvent Event
 
 func NewWebSocket() *WebSocket {
 	w := new(WebSocket)
-	w.Event = make(chan interface{})
+	w.Event = make(chan interface{}, 10)
+	w.StateChanged = make(chan int)
+	w.changeState(WebSocketStateNew)
 	return w
+}
+
+func (w *WebSocket) changeState(state int) {
+	w.State = state
+	select {
+	case w.StateChanged <- state:
+	default:
+	}
 }
 
 // https://github.com/gorilla/websocket/blob/master/examples/echo/client.go
@@ -80,11 +99,11 @@ func (w *WebSocket) Connect(serverPath string, interrupt chan struct{}) error {
 	}
 	// close connection when return
 	defer w.conn.Close()
+	w.changeState(WebSocketStateConnected)
 
 	// Main message loop in another goroutine
 	done := make(chan struct{})
 	errChan := make(chan error)
-	defer close(errChan)
 	go w.runReceiveMessage(done, errChan)
 
 	ticker := time.NewTicker(45 * time.Second)
@@ -95,14 +114,17 @@ func (w *WebSocket) Connect(serverPath string, interrupt chan struct{}) error {
 		select {
 		case <-done:
 			// connection closed
+			w.changeState(WebSocketStateDisconnected)
 			return nil
 		case err := <-errChan:
 			// error
+			w.changeState(WebSocketStateDisconnected)
 			return err
 		case <-ticker.C:
 			// heartbeat
 			err := w.conn.WriteMessage(websocket.TextMessage, []byte{})
 			if err != nil {
+				w.changeState(WebSocketStateDisconnected)
 				return err
 			}
 		case <-interrupt:
@@ -110,12 +132,15 @@ func (w *WebSocket) Connect(serverPath string, interrupt chan struct{}) error {
 			// waiting (with timeout) for the server to close the connection.
 			err := w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
+				// We must set state to closed instead of disconnected, even write close message failed.
+				w.changeState(WebSocketStateClosed)
 				return err
 			}
 			select {
 			case <-done:
 			case <-time.After(time.Second):
 			}
+			w.changeState(WebSocketStateClosed)
 			return nil
 		}
 	}
@@ -124,6 +149,7 @@ func (w *WebSocket) Connect(serverPath string, interrupt chan struct{}) error {
 func (w *WebSocket) runReceiveMessage(done chan<- struct{}, errChan chan<- error) {
 	// done when main loop exit
 	defer close(done)
+	defer close(errChan)
 	for {
 		_, message, err := w.conn.ReadMessage()
 		if err != nil {

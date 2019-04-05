@@ -1,4 +1,4 @@
-package snore_toast
+package toast
 
 import (
 	"os/exec"

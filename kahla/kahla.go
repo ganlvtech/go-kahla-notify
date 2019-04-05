@@ -88,10 +88,6 @@ func castToResponse(i interface{}) *Response {
 	return response
 }
 
-// do http response
-//
-// v must be a pointer to Response struct, which contains Message and Code field.
-// json data returned via v.
 func NewPostRequest(url string, data url.Values) (*http.Request, error) {
 	req, err := http.NewRequest("POST", url, strings.NewReader(data.Encode()))
 	if err != nil {

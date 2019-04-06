@@ -13,10 +13,11 @@ import (
 const KahlaServer string = "https://server.kahla.app"
 
 type Client struct {
-	client     http.Client
-	Auth       *AuthService
-	Friendship *FriendshipService
-	Oss        *OssService
+	client       http.Client
+	Auth         *AuthService
+	Conversation *ConversationService
+	Friendship   *FriendshipService
+	Oss          *OssService
 }
 
 type service struct {
@@ -24,6 +25,8 @@ type service struct {
 }
 
 type AuthService service
+
+type ConversationService service
 
 type FriendshipService service
 
@@ -39,6 +42,7 @@ func NewClient() *Client {
 	c.client = http.Client{}
 	c.client.Jar, _ = cookiejar.New(nil)
 	c.Auth = &AuthService{c}
+	c.Conversation = &ConversationService{c}
 	c.Friendship = &FriendshipService{c}
 	c.Oss = &OssService{c}
 	return c

@@ -97,3 +97,24 @@ func (s *OssService) HeadImgFile(headImgFileKey int, w int, h int) ([]byte, erro
 	}
 	return ioutil.ReadAll(resp.Body)
 }
+
+type SendMessageResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// https://server.kahla.app/conversation/SendMessage/68
+func (c *ConversationService) SendMessage(conversationId int, content string) (*SendMessageResponse, error) {
+	v := url.Values{}
+	v.Add("content", content)
+	req, err := NewPostRequest(KahlaServer+"/conversation/SendMessage/"+strconv.Itoa(conversationId), v)
+	if err != nil {
+		return nil, err
+	}
+	response := &SendMessageResponse{}
+	_, err = c.client.Do(req, response)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}

@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	toast "github.com/ganlvtech/go-kahla-notify/snore-toast"
+	"github.com/ganlvtech/go-kahla-notify/snore-toast"
 	"log"
 	"os"
 	"os/signal"

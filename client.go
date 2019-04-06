@@ -33,7 +33,6 @@ func NewClient(email string, password string, snoreToast *toast.SnoreToast, avat
 }
 
 func (c *Client) toast(title string, message string) error {
-	log.Println(title, ":", message)
 	if c.SnoreToast != nil {
 		return c.SnoreToast.Toast(title, message)
 	}
@@ -41,7 +40,6 @@ func (c *Client) toast(title string, message string) error {
 }
 
 func (c *Client) toastWithImage(title string, message string, imagePath string) error {
-	log.Println(title, ":", message)
 	if c.SnoreToast != nil {
 		return c.SnoreToast.ToastWithImage(title, message, imagePath)
 	}
@@ -71,20 +69,19 @@ func (c *Client) toastWithHeadImageKey(title string, message string, headImgFile
 			err := c.downloadHeadImage(headImgFileKey, filePath)
 			if err != nil {
 				log.Println("Download head image error:", err, "head image file key:", headImgFileKey, "file path:", filePath)
-			} else {
-				err = c.toastWithImage(title, message, filePath)
-				if err != nil {
-					log.Println("Toast with image error:", err, "file path:", filePath)
-				} else {
-					return
-				}
+				_ = c.toast(title, message)
+				return
 			}
-			_ = c.toast(title, message)
+			err = c.toastWithImage(title, message, filePath)
+			if err != nil {
+				log.Println("Toast with image error:", err, "file path:", filePath)
+				_ = c.toast(title, message)
+				return
+			}
 		}()
 		return nil
 	}
-	// Log message
-	return c.toast(title, message)
+	return nil
 }
 
 func (c *Client) runNotifyUnread() {
@@ -112,6 +109,7 @@ func (c *Client) runNotifyUnread() {
 				message = v.LatestMessage
 			}
 			title := fmt.Sprintf("[%d unread] ", v.UnReadAmount) + v.DisplayName + " [Kahla]"
+			log.Println(title, ":", message)
 			headImgFileKey := v.DisplayImageKey
 			err = c.toastWithHeadImageKey(title, message, headImgFileKey)
 			if err != nil {
@@ -136,8 +134,9 @@ func (c *Client) runNotify(interrupt chan struct{}) {
 				} else {
 					title := v.Sender.NickName + " [Kahla]"
 					message := content
+					log.Println(title, ":", message)
 					headImgFileKey := v.Sender.HeadImgFileKey
-					err = c.toastWithHeadImageKey(title, message, headImgFileKey)
+					err := c.toastWithHeadImageKey(title, message, headImgFileKey)
 					if err != nil {
 						log.Println(err)
 					}

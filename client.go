@@ -12,42 +12,42 @@ import (
 )
 
 type Client struct {
-	Client     *kahla.Client
-	Email      string
-	Password   string
-	ServerPath string
-	WebSocket  *kahla.WebSocket
-	SnoreToast *toast.SnoreToast
-	AvatarsDir string
+	client     *kahla.Client
+	email      string
+	password   string
+	serverPath string
+	webSocket  *kahla.WebSocket
+	snoreToast *toast.SnoreToast
+	avatarsDir string
 }
 
 func NewClient(email string, password string, snoreToast *toast.SnoreToast, avatarsDir string) *Client {
 	c := &Client{}
-	c.Email = email
-	c.Password = password
-	c.Client = kahla.NewClient()
-	c.WebSocket = kahla.NewWebSocket()
-	c.SnoreToast = snoreToast
-	c.AvatarsDir = avatarsDir
+	c.email = email
+	c.password = password
+	c.client = kahla.NewClient()
+	c.webSocket = kahla.NewWebSocket()
+	c.snoreToast = snoreToast
+	c.avatarsDir = avatarsDir
 	return c
 }
 
 func (c *Client) toast(title string, message string) error {
-	if c.SnoreToast != nil {
-		return c.SnoreToast.Toast(title, message)
+	if c.snoreToast != nil {
+		return c.snoreToast.Toast(title, message)
 	}
 	return nil
 }
 
 func (c *Client) toastWithImage(title string, message string, imagePath string) error {
-	if c.SnoreToast != nil {
-		return c.SnoreToast.ToastWithImage(title, message, imagePath)
+	if c.snoreToast != nil {
+		return c.snoreToast.ToastWithImage(title, message, imagePath)
 	}
 	return nil
 }
 
 func (c *Client) downloadHeadImage(headImgFileKey int, filePath string) error {
-	data, err := c.Client.Oss.HeadImgFile(headImgFileKey, 100, 100)
+	data, err := c.client.Oss.HeadImgFile(headImgFileKey, 100, 100)
 	if err != nil {
 		return err
 	}
@@ -59,8 +59,8 @@ func (c *Client) downloadHeadImage(headImgFileKey int, filePath string) error {
 }
 
 func (c *Client) toastWithHeadImageKey(title string, message string, headImgFileKey int) error {
-	if c.SnoreToast != nil {
-		filePath := path.Join(c.AvatarsDir, fmt.Sprintf("%d.png", headImgFileKey))
+	if c.snoreToast != nil {
+		filePath := path.Join(c.avatarsDir, fmt.Sprintf("%d.png", headImgFileKey))
 		if fileExists(filePath) {
 			return c.toastWithImage(title, message, filePath)
 		}
@@ -89,7 +89,7 @@ func (c *Client) runNotifyUnread() {
 	log.Println("Loading unread amount.")
 	err := retry.Do(func() error {
 		var err error
-		response, err = c.Client.Friendship.MyFriends(false)
+		response, err = c.client.Friendship.MyFriends(false)
 		if err != nil {
 			log.Println("Loading unread amount failed:", err, "Retry.")
 			return err
@@ -125,7 +125,7 @@ func (c *Client) runNotify(interrupt chan struct{}) {
 		case <-interrupt:
 			log.Println("Notification worker stopped.")
 			return
-		case i := <-c.WebSocket.Event:
+		case i := <-c.webSocket.Event:
 			switch v := i.(type) {
 			case *kahla.NewMessageEvent:
 				content, err := cryptojs.AesDecrypt(v.Content, v.AesKey)
@@ -144,7 +144,7 @@ func (c *Client) runNotify(interrupt chan struct{}) {
 			case *kahla.NewFriendRequestEvent:
 				title := "Friend request"
 				message := "You have got a new friend request!"
-				log.Println(title, ":", message)
+				log.Println(title, ":", message, "nick name:", v.Requester.NickName, "id:", v.Requester.ID)
 				err := c.toast(title, message)
 				if err != nil {
 					log.Println(err)
@@ -152,7 +152,7 @@ func (c *Client) runNotify(interrupt chan struct{}) {
 			case *kahla.WereDeletedEvent:
 				title := "Were deleted"
 				message := "You were deleted by one of your friends from his friend list."
-				log.Println(title, ":", message)
+				log.Println(title, ":", message, "nick name:", v.Trigger.NickName, "id:", v.Trigger.ID)
 				err := c.toast(title, message)
 				if err != nil {
 					log.Println(err)
@@ -160,7 +160,15 @@ func (c *Client) runNotify(interrupt chan struct{}) {
 			case *kahla.FriendAcceptedEvent:
 				title := "Friend request"
 				message := "Your friend request was accepted!"
-				log.Println(title, ":", message)
+				log.Println(title, ":", message, "nick name:", v.Target.NickName, "id:", v.Target.ID)
+				err := c.toast(title, message)
+				if err != nil {
+					log.Println(err)
+				}
+			case *kahla.TimerUpdatedEvent:
+				title := "Self-destruct timer updated!"
+				message := fmt.Sprintf("Your current message life time is: %d", v.NewTimer)
+				log.Println(title, ":", message, "conversation id:", v.ConversationID)
 				err := c.toast(title, message)
 				if err != nil {
 					log.Println(err)
@@ -176,9 +184,9 @@ func (c *Client) Run(interrupt chan struct{}) error {
 	var err error
 
 	// Try login
-	log.Println("Login as user:", c.Email)
+	log.Println("Login as user:", c.email)
 	err = retry.Do(func() error {
-		_, err := c.Client.Auth.Login(c.Email, c.Password)
+		_, err := c.client.Auth.Login(c.email, c.password)
 		if err != nil {
 			log.Println("Login failed:", err, "Retry.")
 			return err
@@ -202,33 +210,33 @@ func (c *Client) Run(interrupt chan struct{}) error {
 	log.Println("Initializing pusher.")
 	err = retry.Do(func() error {
 		// Try initialize pusher
-		response, err := c.Client.Auth.InitPusher()
+		response, err := c.client.Auth.InitPusher()
 		if err != nil {
 			log.Println("Initialize pusher failed:", err, "Retry.")
 			return err
 		}
-		c.ServerPath = response.ServerPath
+		c.serverPath = response.ServerPath
 		log.Println("Initialize pusher OK.")
 
 		// Try connect to pusher
 		log.Println("Connecting to pusher.")
 		err = retry.Do(func() error {
 			go func() {
-				state := <-c.WebSocket.StateChanged
+				state := <-c.webSocket.StateChanged
 				if state == kahla.WebSocketStateConnected {
 					log.Println("Connected to pusher OK.")
 				}
 			}()
-			err := c.WebSocket.Connect(c.ServerPath, interrupt)
+			err := c.webSocket.Connect(c.serverPath, interrupt)
 			if err != nil {
-				if c.WebSocket.State == kahla.WebSocketStateClosed {
+				if c.webSocket.State == kahla.WebSocketStateClosed {
 					log.Println("Keyboard interrupt:", err)
 					return nil
-				} else if c.WebSocket.State == kahla.WebSocketStateDisconnected {
+				} else if c.webSocket.State == kahla.WebSocketStateDisconnected {
 					log.Println("Disconnected:", err, "Retry.")
 					return err
 				}
-				log.Println("State:", c.WebSocket.State, "Error:", err, "Retry.")
+				log.Println("State:", c.webSocket.State, "Error:", err, "Retry.")
 				return err
 			}
 			log.Println("Keyboard interrupt.")

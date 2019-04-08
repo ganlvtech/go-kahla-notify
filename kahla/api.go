@@ -8,11 +8,27 @@ import (
 	"time"
 )
 
+type User struct {
+	MakeEmailPublic   bool        `json:"makeEmailPublic"`
+	Email             string      `json:"email"`
+	ID                string      `json:"id"`
+	Bio               string      `json:"bio"`
+	NickName          string      `json:"nickName"`
+	Sex               interface{} `json:"sex"`
+	HeadImgFileKey    int         `json:"headImgFileKey"`
+	PreferedLanguage  string      `json:"preferedLanguage"`
+	AccountCreateTime string      `json:"accountCreateTime"`
+	EmailConfirmed    bool        `json:"emailConfirmed"`
+}
+
 type LoginResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
+// POST https://server.kahla.app/Auth/AuthByPassword
+//
+// Email=123@abc.com&Password=123456
 func (s *AuthService) Login(email string, password string) (*LoginResponse, error) {
 	v := url.Values{}
 	v.Add("Email", email)
@@ -34,9 +50,10 @@ type InitPusherResponse struct {
 	ChannelID  int    `json:"channelId"`
 	ConnectKey string `json:"connectKey"`
 	Code       int    `json:"code"`
-	Message    string `json:"message"`
+	Message    string `json:" "`
 }
 
+// GET https://server.kahla.app/Auth/InitPusher
 func (s *AuthService) InitPusher() (*InitPusherResponse, error) {
 	req, err := http.NewRequest("GET", KahlaServer+"/Auth/InitPusher", nil)
 	if err != nil {
@@ -67,6 +84,7 @@ type MyFriendsResponse struct {
 	Message string `json:"message"`
 }
 
+// GET https://server.kahla.app/friendship/MyFriends?orderByName=false
 func (s *FriendshipService) MyFriends(orderByName bool) (*MyFriendsResponse, error) {
 	v := url.Values{}
 	v.Set("orderByName", strconv.FormatBool(orderByName))
@@ -82,7 +100,56 @@ func (s *FriendshipService) MyFriends(orderByName bool) (*MyFriendsResponse, err
 	return response, nil
 }
 
-// https://oss.aiursoft.com/download/fromkey/2611?w=100&h=100
+type MyRequestsResponse struct {
+	Items []struct {
+		ID         int       `json:"id"`
+		CreatorID  string    `json:"creatorId"`
+		Creator    User      `json:"creator"`
+		TargetID   string    `json:"targetId"`
+		CreateTime time.Time `json:"createTime"`
+		Completed  bool      `json:"completed"`
+	} `json:"items"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// GET https://server.kahla.app/friendship/MyRequests
+func (s *FriendshipService) MyRequests() (*MyRequestsResponse, error) {
+	req, err := http.NewRequest("GET", KahlaServer+"/friendship/MyRequests", nil)
+	if err != nil {
+		return nil, err
+	}
+	response := &MyRequestsResponse{}
+	_, err = s.client.Do(req, response)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+type CompleteRequestResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// POST https://server.kahla.app/friendship/CompleteRequest/139
+// accept=true
+func (s *FriendshipService) CompleteRequest(requestId int, accept bool) (*CompleteRequestResponse, error) {
+	v := url.Values{}
+	v.Add("accept", strconv.FormatBool(accept))
+	req, err := NewPostRequest(KahlaServer+"/Friendship/CompleteRequest/"+strconv.Itoa(requestId), v)
+	if err != nil {
+		return nil, err
+	}
+	response := &CompleteRequestResponse{}
+	_, err = s.client.Do(req, response)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+// GET https://oss.aiursoft.com/download/fromkey/2611?w=100&h=100
 func (s *OssService) HeadImgFile(headImgFileKey int, w int, h int) ([]byte, error) {
 	v := url.Values{}
 	v.Set("w", strconv.Itoa(w))
@@ -103,7 +170,9 @@ type SendMessageResponse struct {
 	Message string `json:"message"`
 }
 
-// https://server.kahla.app/conversation/SendMessage/68
+// POST https://server.kahla.app/conversation/SendMessage/68
+//
+// content=content
 func (c *ConversationService) SendMessage(conversationId int, content string) (*SendMessageResponse, error) {
 	v := url.Values{}
 	v.Add("content", content)

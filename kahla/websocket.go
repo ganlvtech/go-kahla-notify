@@ -10,8 +10,9 @@ import (
 const (
 	EventTypeNewMessage = iota
 	EventTypeNewFriendRequest
-	EventTypeWereDeletedEvent
-	EventTypeFriendAcceptedEvent
+	EventTypeWereDeleted
+	EventTypeFriendAccepted
+	EventTypeTimerUpdated
 )
 
 const (
@@ -29,7 +30,8 @@ type WebSocket struct {
 }
 
 type Event struct {
-	Type int `json:"type"`
+	Type            int    `json:"type"`
+	TypeDescription string `json:"typeDescription"`
 }
 
 type InvalidEventTypeError struct {
@@ -42,33 +44,35 @@ func (i *InvalidEventTypeError) Error() string {
 
 type NewMessageEvent struct {
 	Event
-	ConversationID int `json:"conversationId"`
-	Sender         struct {
-		MakeEmailPublic   bool        `json:"makeEmailPublic"`
-		Email             string      `json:"email"`
-		ID                string      `json:"id"`
-		Bio               interface{} `json:"bio"`
-		NickName          string      `json:"nickName"`
-		Sex               interface{} `json:"sex"`
-		HeadImgFileKey    int         `json:"headImgFileKey"`
-		PreferedLanguage  string      `json:"preferedLanguage"`
-		AccountCreateTime string      `json:"accountCreateTime"`
-		EmailConfirmed    bool        `json:"emailConfirmed"`
-	} `json:"sender"`
-	Content  string `json:"content"`
-	AesKey   string `json:"aesKey"`
-	Muted    bool   `json:"muted"`
-	SentByMe bool   `json:"sentByMe"`
+	ConversationID int    `json:"conversationId"`
+	Sender         User   `json:"sender"`
+	Content        string `json:"content"`
+	AesKey         string `json:"aesKey"`
+	Muted          bool   `json:"muted"`
+	SentByMe       bool   `json:"sentByMe"`
 }
 
 type NewFriendRequestEvent struct {
 	Event
-	RequesterId string `json:"requesterId"`
+	RequesterID string `json:"requesterId"`
+	Requester   User `json:"requester"`
 }
 
-type WereDeletedEvent Event
+type WereDeletedEvent struct {
+	Event
+	Trigger User `json:"trigger"`
+}
 
-type FriendAcceptedEvent Event
+type FriendAcceptedEvent struct {
+	Event
+	Target User `json:"target"`
+}
+
+type TimerUpdatedEvent struct {
+	ConversationID int `json:"conversationId"`
+	NewTimer       int `json:"newTimer"`
+	Event
+}
 
 func NewWebSocket() *WebSocket {
 	w := new(WebSocket)
@@ -122,11 +126,11 @@ func (w *WebSocket) Connect(serverPath string, interrupt chan struct{}) error {
 			return err
 		case <-ticker.C:
 			// heartbeat
-			err := w.conn.WriteMessage(websocket.TextMessage, []byte{})
-			if err != nil {
-				w.changeState(WebSocketStateDisconnected)
-				return err
-			}
+			// err := w.conn.WriteMessage(websocket.TextMessage, []byte{})
+			// if err != nil {
+			// 	w.changeState(WebSocketStateDisconnected)
+			// 	return err
+			// }
 		case <-interrupt:
 			// Cleanly close the connection by sending a close message and then
 			// waiting (with timeout) for the server to close the connection.
@@ -179,10 +183,12 @@ func DecodeWebSocketEvent(message []byte) (interface{}, error) {
 		event = &NewMessageEvent{}
 	case EventTypeNewFriendRequest:
 		event = &NewFriendRequestEvent{}
-	case EventTypeWereDeletedEvent:
+	case EventTypeWereDeleted:
 		event = &WereDeletedEvent{}
-	case EventTypeFriendAcceptedEvent:
+	case EventTypeFriendAccepted:
 		event = &FriendAcceptedEvent{}
+	case EventTypeTimerUpdated:
+		event = &TimerUpdatedEvent{}
 	default:
 		return event1, &InvalidEventTypeError{event1.Type}
 	}

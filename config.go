@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 )
 
 type Config struct {
 	Email            string `json:"Email"`
 	Password         string `json:"Password"`
+	ServerUrl        string `json:"ServerUrl"`
+	OssUrl           string `json:"OssUrl"`
 	EnableSnoreToast bool   `json:"EnableSnoreToast"`
 	SnoreToastPath   string `json:"SnoreToastPath"`
 	AvatarsDir       string `json:"AvatarsDir"`
@@ -34,10 +37,22 @@ func SaveConfigToFile(filename string, config *Config) error {
 }
 
 func LoadConfig(data []byte) (*Config, error) {
-	config := new(Config)
+	config := &Config{}
 	err := json.Unmarshal(data, config)
+	if config.Email == "" {
+		return config, errors.New("empty email")
+	}
+	if config.Password == "" {
+		return config, errors.New("empty password")
+	}
 	if config.SnoreToastPath == "" {
 		config.SnoreToastPath = "SnoreToast.exe"
+	}
+	if config.ServerUrl == "" {
+		config.ServerUrl = "https://server.kahla.app"
+	}
+	if config.OssUrl == "" {
+		config.OssUrl = "https://oss.aiursoft.com"
 	}
 	if config.AvatarsDir == "" {
 		config.AvatarsDir = "avatars"

@@ -2,52 +2,45 @@ package main
 
 import (
 	"fmt"
-	"github.com/avast/retry-go"
-	"github.com/ganlvtech/go-kahla-notify/cryptojs"
-	"github.com/ganlvtech/go-kahla-notify/kahla"
-	"github.com/ganlvtech/go-kahla-notify/snore-toast"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"path"
+	"time"
+
+	"github.com/ganlvtech/go-kahla-api/cryptojs"
+	"github.com/ganlvtech/go-kahla-api/kahla"
+	"github.com/ganlvtech/go-kahla-api/pusher"
+
+	toast "github.com/ganlvtech/go-kahla-notify/snore-toast"
 )
 
 type Client struct {
+	config     *Config
 	client     *kahla.Client
-	email      string
-	password   string
-	serverPath string
-	webSocket  *kahla.WebSocket
+	pusher     *pusher.Pusher
 	snoreToast *toast.SnoreToast
-	avatarsDir string
 }
 
-func NewClient(email string, password string, snoreToast *toast.SnoreToast, avatarsDir string) *Client {
-	c := &Client{}
-	c.email = email
-	c.password = password
-	c.client = kahla.NewClient()
-	c.webSocket = kahla.NewWebSocket()
-	c.snoreToast = snoreToast
-	c.avatarsDir = avatarsDir
+func NewClient(config *Config) *Client {
+	c := &Client{
+		config: config,
+		client: kahla.NewClient(config.ServerUrl, config.OssUrl),
+	}
+	if config.EnableSnoreToast {
+		c.snoreToast = toast.New(config.SnoreToastPath)
+	}
 	return c
 }
 
-func (c *Client) toast(title string, message string) error {
-	if c.snoreToast != nil {
-		return c.snoreToast.Toast(title, message)
-	}
-	return nil
-}
-
-func (c *Client) toastWithImage(title string, message string, imagePath string) error {
-	if c.snoreToast != nil {
-		return c.snoreToast.ToastWithImage(title, message, imagePath)
-	}
-	return nil
-}
-
-func (c *Client) downloadHeadImage(headImgFileKey int, filePath string) error {
-	data, err := c.client.Oss.HeadImgFile(headImgFileKey, 100, 100)
+func (c *Client) downloadHeadImage(headImgFileKey uint32, filePath string) error {
+	var w uint32 = 100
+	var h uint32 = 100
+	data, _, err := c.client.Oss.HeadImgFile(&kahla.Oss_Download_FromKeyRequest{
+		HeadImgFileKey: headImgFileKey,
+		W:              &w,
+		H:              &h,
+	})
 	if err != nil {
 		return err
 	}
@@ -58,200 +51,189 @@ func (c *Client) downloadHeadImage(headImgFileKey int, filePath string) error {
 	return nil
 }
 
-func (c *Client) toastWithHeadImageKey(title string, message string, headImgFileKey int) error {
-	if c.snoreToast != nil {
-		filePath := path.Join(c.avatarsDir, fmt.Sprintf("%d.png", headImgFileKey))
-		if fileExists(filePath) {
-			return c.toastWithImage(title, message, filePath)
-		}
+func (c *Client) toastAsync(title string, message string) {
+	go c.snoreToast.Toast(title, message)
+}
 
-		go func() {
-			err := c.downloadHeadImage(headImgFileKey, filePath)
-			if err != nil {
-				log.Println("Download head image error:", err, "head image file key:", headImgFileKey, "file path:", filePath)
-				_ = c.toast(title, message)
-				return
+func (c *Client) toastWithHeadImageKey(title string, message string, headImgFileKey uint32) error {
+	filePath := path.Join(c.config.AvatarsDir, fmt.Sprintf("%d.png", headImgFileKey))
+	if fileExists(filePath) {
+		return c.snoreToast.ToastWithImage(title, message, filePath)
+	}
+
+	done := make(chan bool)
+	go func() {
+		err := c.downloadHeadImage(headImgFileKey, filePath)
+		if err != nil {
+			log.Println("Download head image error:", err, "head image file key:", headImgFileKey, "file path:", filePath)
+			done <- false
+			return
+		}
+		err = c.snoreToast.ToastWithImage(title, message, filePath)
+		if err != nil {
+			log.Println("Toast with image error:", err, "file path:", filePath)
+			done <- false
+			return
+		}
+		done <- true
+	}()
+	select {
+	case downloaded := <-done:
+		if downloaded {
+			err := c.snoreToast.ToastWithImage(title, message, filePath)
+			if err == nil {
+				return nil
 			}
-			err = c.toastWithImage(title, message, filePath)
-			if err != nil {
-				log.Println("Toast with image error:", err, "file path:", filePath)
-				_ = c.toast(title, message)
-				return
-			}
-		}()
-		return nil
+		}
+	case <-time.After(10 * time.Second):
+	}
+	return c.snoreToast.Toast(title, message)
+}
+
+func (c *Client) toastWithHeadImageKeyAsync(title string, message string, headImgFileKey uint32) {
+	go c.toastWithHeadImageKey(title, message, headImgFileKey)
+}
+
+func (c *Client) authByPassword() error {
+	response, httpResponse, err := c.client.Auth.AuthByPassword(&kahla.Auth_AuthByPasswordRequest{
+		Email:    c.config.Email,
+		Password: c.config.Password,
+	})
+	if err != nil {
+		return err
+	}
+	if httpResponse.StatusCode != http.StatusOK {
+		return &HttpResponseStatusCodeNotOKError{httpResponse}
+	}
+	if response.Code != 0 {
+		return &KahlaResponseCodeNotZeroError{
+			Tag:     "AuthByPassword",
+			Code:    response.Code,
+			Message: response.Message,
+		}
 	}
 	return nil
 }
 
-func (c *Client) runNotifyUnread() {
-	var response *kahla.MyFriendsResponse
-	log.Println("Loading unread amount.")
-	err := retry.Do(func() error {
-		var err error
-		response, err = c.client.Friendship.MyFriends(false)
-		if err != nil {
-			log.Println("Loading unread amount failed:", err, "Retry.")
-			return err
-		}
-		return nil
-	})
+func (c *Client) initPusher() (*kahla.Auth_InitPusherResponse, error) {
+	response, httpResponse, err := c.client.Auth.InitPusher()
 	if err != nil {
-		log.Println("Loading unread amount failed too many times:", err)
-		return
+		return response, err
 	}
+	if httpResponse.StatusCode != http.StatusOK {
+		return response, &HttpResponseStatusCodeNotOKError{httpResponse}
+	}
+	if response.Code != 0 {
+		return response, &KahlaResponseCodeNotZeroError{
+			Tag:     "InitPusher",
+			Code:    response.Code,
+			Message: response.Message,
+		}
+	}
+	return response, nil
+}
 
-	for _, v := range response.Items {
-		if v.UnReadAmount > 0 {
-			message, err := cryptojs.AesDecrypt(v.LatestMessage, v.AesKey)
-			if err != nil {
-				log.Println("crypto.js AES decode error:", err)
-				message = v.LatestMessage
-			}
-			title := fmt.Sprintf("[%d unread] ", v.UnReadAmount) + v.DisplayName + " [Kahla]"
+func (c *Client) pusherDefaultEventHandler(i interface{}) {
+	switch v := i.(type) {
+	case *pusher.Pusher_NewMessageEvent:
+		content, err := cryptojs.AesDecrypt(v.Content, v.AesKey)
+		if err != nil {
+			log.Println(err)
+		} else {
+			title := v.Sender.NickName
+			message := content
 			log.Println(title, ":", message)
-			headImgFileKey := v.DisplayImageKey
-			err = c.toastWithHeadImageKey(title, message, headImgFileKey)
-			if err != nil {
-				log.Println(err)
-			}
 		}
+	case *pusher.Pusher_NewFriendRequestEvent:
+		title := "Friend request"
+		message := "You have got a new friend request!"
+		log.Println(title, ":", message, "nick name:", v.Requester.NickName, "id:", v.Requester.Id)
+	case *pusher.Pusher_WereDeletedEvent:
+		title := "Were deleted"
+		message := "You were deleted by one of your friends from his friend list."
+		log.Println(title, ":", message, "nick name:", v.Trigger.NickName, "id:", v.Trigger.Id)
+	case *pusher.Pusher_FriendAcceptedEvent:
+		title := "Friend request"
+		message := "Your friend request was accepted!"
+		log.Println(title, ":", message, "nick name:", v.Target.NickName, "id:", v.Target.Id)
+	case *pusher.Pusher_TimerUpdatedEvent:
+		title := "Self-destruct timer updated!"
+		message := fmt.Sprintf("Your current message life time is: %d", v.NewTimer)
+		log.Println(title, ":", message, "conversation id:", v.ConversationId)
+	case *pusher.Pusher_NewMemberEvent:
+		title := "New member"
+		message := fmt.Sprintf("%s has join the group.", v.NewMember.NickName)
+		log.Println(title, ":", message, "conversation id:", v.ConversationId)
+	case *pusher.Pusher_SomeoneLeftEvent:
+		title := "Someone left"
+		message := fmt.Sprintf("%s has successfully left the group.", v.LeftUser.NickName)
+		log.Println(title, ":", message, "conversation id:", v.ConversationId)
+	case *pusher.Pusher_DissolveEvent:
+		title := "Group Dissolved"
+		message := "A group dissolved"
+		log.Println(title, ":", message, "conversation id:", v.ConversationId)
 	}
 }
 
-func (c *Client) runNotify(interrupt chan struct{}) {
-	for {
-		select {
-		case <-interrupt:
-			log.Println("Notification worker stopped.")
-			return
-		case i := <-c.webSocket.Event:
-			switch v := i.(type) {
-			case *kahla.NewMessageEvent:
-				content, err := cryptojs.AesDecrypt(v.Content, v.AesKey)
-				if err != nil {
-					log.Println(err)
-				} else {
-					title := v.Sender.NickName + " [Kahla]"
-					message := content
-					log.Println(title, ":", message)
-					headImgFileKey := v.Sender.HeadImgFileKey
-					err := c.toastWithHeadImageKey(title, message, headImgFileKey)
-					if err != nil {
-						log.Println(err)
-					}
-				}
-			case *kahla.NewFriendRequestEvent:
-				title := "Friend request"
-				message := "You have got a new friend request!"
-				log.Println(title, ":", message, "nick name:", v.Requester.NickName, "id:", v.Requester.ID)
-				err := c.toast(title, message)
-				if err != nil {
-					log.Println(err)
-				}
-			case *kahla.WereDeletedEvent:
-				title := "Were deleted"
-				message := "You were deleted by one of your friends from his friend list."
-				log.Println(title, ":", message, "nick name:", v.Trigger.NickName, "id:", v.Trigger.ID)
-				err := c.toast(title, message)
-				if err != nil {
-					log.Println(err)
-				}
-			case *kahla.FriendAcceptedEvent:
-				title := "Friend request"
-				message := "Your friend request was accepted!"
-				log.Println(title, ":", message, "nick name:", v.Target.NickName, "id:", v.Target.ID)
-				err := c.toast(title, message)
-				if err != nil {
-					log.Println(err)
-				}
-			case *kahla.TimerUpdatedEvent:
-				title := "Self-destruct timer updated!"
-				message := fmt.Sprintf("Your current message life time is: %d", v.NewTimer)
-				log.Println(title, ":", message, "conversation id:", v.ConversationID)
-				err := c.toast(title, message)
-				if err != nil {
-					log.Println(err)
-				}
-			default:
-				panic("invalid event type")
-			}
+func (c *Client) pusherToastEventHandler(i interface{}) {
+	switch v := i.(type) {
+	case *pusher.Pusher_NewMessageEvent:
+		content, err := cryptojs.AesDecrypt(v.Content, v.AesKey)
+		if err == nil {
+			c.toastWithHeadImageKeyAsync(v.Sender.NickName, content, v.Sender.HeadImgFileKey)
 		}
+	case *pusher.Pusher_NewFriendRequestEvent:
+		c.toastWithHeadImageKeyAsync("Friend request", fmt.Sprintf("You got a new friend request from %s.", v.Requester.NickName), v.Requester.HeadImgFileKey)
+	case *pusher.Pusher_WereDeletedEvent:
+		c.toastWithHeadImageKeyAsync("Were deleted", fmt.Sprintf("You were deleted by %s!", v.Trigger.NickName), v.Trigger.HeadImgFileKey)
+	case *pusher.Pusher_FriendAcceptedEvent:
+		c.toastWithHeadImageKeyAsync("Friend request", fmt.Sprintf("Your friend request to %s was accepted.", v.Target.NickName), v.Target.HeadImgFileKey)
+	case *pusher.Pusher_TimerUpdatedEvent:
+		// Do nothing
+	case *pusher.Pusher_NewMemberEvent:
+		// Do nothing
+	case *pusher.Pusher_SomeoneLeftEvent:
+		// Do nothing
+	case *pusher.Pusher_DissolveEvent:
+		c.toastAsync("Group dissolved", fmt.Sprintf("Group (id = %d) was dissolved!", v.ConversationId))
+	default:
+		log.Fatal("unknown event type")
 	}
 }
 
-func (c *Client) Run(interrupt chan struct{}) error {
-	var err error
-
-	// Try login
-	log.Println("Login as user:", c.email)
-	err = retry.Do(func() error {
-		_, err := c.client.Auth.Login(c.email, c.password)
-		if err != nil {
-			log.Println("Login failed:", err, "Retry.")
-			return err
-		}
-		return nil
-	})
+func (c *Client) Run(interrupt <-chan struct{}) error {
+	err := c.authByPassword()
 	if err != nil {
-		log.Println("Login failed too many times:", err)
 		return err
 	}
 	log.Println("Login OK.")
-
-	// Unread amount
-	go c.runNotifyUnread()
-
-	interrupt2 := make(chan struct{})
-	defer close(interrupt2)
-	go c.runNotify(interrupt2)
-
-	// Try connect to pusher
-	log.Println("Initializing pusher.")
-	err = retry.Do(func() error {
-		// Try initialize pusher
-		response, err := c.client.Auth.InitPusher()
-		if err != nil {
-			log.Println("Initialize pusher failed:", err, "Retry.")
-			return err
-		}
-		c.serverPath = response.ServerPath
-		log.Println("Initialize pusher OK.")
-
-		// Try connect to pusher
-		log.Println("Connecting to pusher.")
-		err = retry.Do(func() error {
-			go func() {
-				state := <-c.webSocket.StateChanged
-				if state == kahla.WebSocketStateConnected {
-					log.Println("Connected to pusher OK.")
-				}
-			}()
-			err := c.webSocket.Connect(c.serverPath, interrupt)
-			if err != nil {
-				if c.webSocket.State == kahla.WebSocketStateClosed {
-					log.Println("Keyboard interrupt:", err)
-					return nil
-				} else if c.webSocket.State == kahla.WebSocketStateDisconnected {
-					log.Println("Disconnected:", err, "Retry.")
-					return err
-				}
-				log.Println("State:", c.webSocket.State, "Error:", err, "Retry.")
-				return err
-			}
-			log.Println("Keyboard interrupt.")
-			return nil
-		})
-		if err != nil {
-			log.Println("Connected to pusher failed too many times:", err)
-			return err
-		}
-		return nil
-	})
+	response, err := c.initPusher()
 	if err != nil {
-		log.Println("Initialize pusher failed too many times:", err)
 		return err
 	}
-	log.Println("Kahla client stopped.")
-	return nil
+	log.Println("Init pusher OK.")
+	c.pusher = pusher.New(response.ServerPath, c.pusherDefaultEventHandler)
+	if c.config.EnableSnoreToast {
+		c.pusher.EventHandlers = append(c.pusher.EventHandlers, c.pusherToastEventHandler)
+	}
+	log.Println("Connecting to pusher...")
+	go func() {
+		for v := range c.pusher.StateChangeChan {
+			switch v {
+			case pusher.WebSocketStateNew:
+				panic("unreachable")
+			case pusher.WebSocketStateConnected:
+				log.Println("Connect to pusher OK.")
+			case pusher.WebSocketStateDisconnected:
+				log.Println("Disconnect from pusher.")
+			case pusher.WebSocketStateClosed:
+				log.Println("Pusher closed.")
+			}
+		}
+	}()
+	err = c.pusher.Connect(interrupt)
+	if err != nil {
+		log.Println("Disconnected from pusher.")
+	}
+	return err
 }

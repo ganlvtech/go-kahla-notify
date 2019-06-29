@@ -2,21 +2,14 @@ package main
 
 import (
 	"flag"
-	"github.com/ganlvtech/go-kahla-notify/snore-toast"
 	"log"
 	"os"
 	"os/signal"
+
+	"github.com/avast/retry-go"
 )
 
 const DefaultConfigFile = "config.json"
-
-func fileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
-}
 
 func main() {
 	var configFile string
@@ -32,9 +25,9 @@ func main() {
 	}
 
 	if !fileExists(configFile) {
-		err := SaveConfigToFile(configFile, new(Config))
+		err := SaveConfigToFile(configFile, &Config{})
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 		log.Println("Please input your email and password in:", configFile)
 		return
@@ -42,7 +35,7 @@ func main() {
 
 	config, err := LoadConfigFromFile(configFile)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	interrupt := make(chan os.Signal, 1)
@@ -53,19 +46,13 @@ func main() {
 		close(interrupt2)
 	}()
 
-	var snoreToast *toast.SnoreToast
-	if config.EnableSnoreToast {
-		snoreToast = toast.New(config.SnoreToastPath)
-	}
-
-	c := NewClient(config.Email, config.Password, snoreToast, config.AvatarsDir)
-
-	for {
-		err = c.Run(interrupt2)
-		if err != nil {
-			log.Println(err)
-		} else {
-			break
-		}
+	c := NewClient(config)
+	err = retry.Do(func() error {
+		return c.Run(interrupt2)
+	})
+	if err != nil {
+		log.Println(err)
+	} else {
+		log.Println("Interrupt")
 	}
 }

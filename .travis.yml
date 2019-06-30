@@ -1,0 +1,22 @@
+language: go
+
+go:
+  - 1.12.x
+
+before_script:
+  - export GOARCH=amd64
+  - export GOOS=windows
+
+script:
+  - go build
+
+before_deploy:
+  - mv go-kahla-notify.exe go-kahla-notify-${TRAVIS_TAG}.exe
+
+deploy:
+  provider: releases
+  api_key: $GITHUB_TOKEN
+  file: "go-kahla-notify-${TRAVIS_TAG}.exe"
+  skip_cleanup: true
+  on:
+    tags: true

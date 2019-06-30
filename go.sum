@@ -1,0 +1,6 @@
+github.com/avast/retry-go v2.3.0+incompatible h1:GdXHi3qw0JvbR1Wg1Hr/kx0b6lS36xfypCP4VpZARm4=
+github.com/avast/retry-go v2.3.0+incompatible/go.mod h1:XtSnn+n/sHqQIpZ10K1qAevBhOOCWBLXXy3hyiqqBrY=
+github.com/ganlvtech/go-kahla-api v0.0.0-20190628152817-fb60d586480b h1:A5GKOEmH6mCslREV+dY2u6GYhtJWZJ+Ldqx0GO+SHcQ=
+github.com/ganlvtech/go-kahla-api v0.0.0-20190628152817-fb60d586480b/go.mod h1:H2UNltWz4nljJqCoyQ4EoWWxHjcnmeg0i+ceJK8q5rQ=
+github.com/gorilla/websocket v1.4.0 h1:WDFjx/TMzVgy9VdMMQi2K2Emtwi2QcUQsztZ/zLaH/Q=
+github.com/gorilla/websocket v1.4.0/go.mod h1:E7qHFY5m1UJ88s3WnNqhKjPHQ0heANvMoAMk2YaljkQ=
